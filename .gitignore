@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+
+# Envs & IDE
+.env
+*.env
+.vscode/
+.idea/
+.DS_Store
+
+# Node (si jamais)
+node_modules/
+
+# Docker & artefacts locaux
+db_data/
+*.log
+
+# Certs & web root hors projet
+/etc/letsencrypt/
+var/www/certbot/
