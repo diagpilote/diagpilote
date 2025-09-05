@@ -93,7 +93,7 @@ _redis = Redis(host=os.getenv("REDIS_HOST", "redis"),
                port=int(os.getenv("REDIS_PORT", 6379)))
 _queue = Queue(connection=_redis)
 
-@app.route("/jobs/test", methods=["POST", "GET"])
+@app.route("/jobs/test", methods=["POST"])
 def jobs_test():
     """Déclenche un job de démo."""
     n = int(request.args.get("n", 1))
@@ -153,3 +153,14 @@ def jobs_download(job_id: str):
                      download_name=os.path.basename(full),
                      mimetype="text/plain")
 # ===== fin ajout =====
+
+# --- garde d'accès pour /jobs/test via X-Job-Token ---
+# Le token est lu dans l'env à l'initialisation du module
+JOB_TOKEN = os.getenv("JOB_ENQUEUE_TOKEN")
+
+@app.before_request
+def _protect_jobs_test():
+    # Protéger uniquement l'endpoint de démo
+    if request.path == "/jobs/test" and request.method in ("GET", "POST"):
+        if JOB_TOKEN and request.headers.get("X-Job-Token") != JOB_TOKEN:
+            return jsonify({"error": "forbidden"}), 403

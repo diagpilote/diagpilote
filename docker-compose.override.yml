@@ -19,3 +19,7 @@ services:
         condition: service_started
       redis:
         condition: service_healthy
+
+  web:
+    environment:
+      - JOB_ENQUEUE_TOKEN=${JOB_ENQUEUE_TOKEN}
