@@ -257,25 +257,44 @@ class Rdv(db.Model):
 @app.route("/devis", methods=["GET","POST"])
 def devis_endpoint():
     if request.method == "GET":
-        q = (request.args.get("q") or "").strip()
-        status = request.args.get("status")
+        # filtres, pagination, tri
+        from sqlalchemy import or_
+        def _parse_iso(ts):
+            if not ts: return None
+            import datetime
+            try:
+                return datetime.datetime.fromisoformat(str(ts).replace('Z','+00:00')).replace(tzinfo=None)
+            except Exception:
+                return None
+        q = (request.args.get('q') or '').strip()
+        status = (request.args.get('status') or '').strip()
+        created_from = _parse_iso(request.args.get('created_from'))
+        created_to   = _parse_iso(request.args.get('created_to'))
         try:
-            limit = min(max(int(request.args.get("limit", 50)), 1), 200)
+            limit = int(request.args.get('limit', 50))
+            offset = int(request.args.get('offset', 0))
         except Exception:
-            limit = 50
-        try:
-            offset = max(int(request.args.get("offset", 0)), 0)
-        except Exception:
-            offset = 0
+            return jsonify({'error':'validation','details':'limit/offset invalides'}), 400
+        limit = max(1, min(limit, 200))
+        offset = max(0, offset)
         query = Devis.query
         if status:
             query = query.filter(Devis.status == status)
         if q:
             like = f"%{q}%"
-            query = query.filter(db.or_(Devis.client.ilike(like), Devis.ref.ilike(like)))
-        items = [d.to_dict() for d in query.order_by(Devis.created_at.desc()).offset(offset).limit(limit).all()]
-        return jsonify({"status":"ok","devis": items, "limit": limit, "offset": offset, "count": len(items)})
-
+            query = query.filter(or_(Devis.client.ilike(like), Devis.ref.ilike(like)))
+        if created_from:
+            query = query.filter(Devis.created_at >= created_from)
+        if created_to:
+            query = query.filter(Devis.created_at <= created_to)
+        sort = (request.args.get('sort') or 'created_at').lower()
+        order = (request.args.get('order') or 'desc').lower()
+        colmap = {'created_at': Devis.created_at, 'montant': Devis.montant, 'id': Devis.id}
+        col = colmap.get(sort, Devis.created_at)
+        order_expr = col.desc() if order == 'desc' else col.asc()
+        q2 = query.order_by(order_expr, Devis.id.desc())
+        items = [d.to_dict() for d in q2.offset(offset).limit(limit).all()]
+        return jsonify({'status':'ok','devis': items, 'limit': limit, 'offset': offset, 'count': len(items)})
     data = (request.get_json(silent=True) or {})
 
     # validation légère
