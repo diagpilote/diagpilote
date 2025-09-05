@@ -182,7 +182,7 @@ def _protect_jobs_test():
 
 @app.before_request
 def _protect_api_key_endpoints():
-    if request.path in ("/devis", "/rdv") and request.method in ("GET","POST"):
+    if (request.path.startswith("/devis") or request.path.startswith("/rdv")) and request.method in ("GET","POST","PUT","DELETE"):
         if API_KEY and request.headers.get("X-API-Key") != API_KEY:
             return jsonify({"error":"forbidden"}), 403
 
@@ -314,3 +314,43 @@ def rdv_endpoint():
     )
     db.session.add(obj); db.session.commit()
     return jsonify({"status":"created","rdv": obj.to_dict()}), 201
+
+
+@app.get("/devis/<int:devis_id>")
+def devis_get_one(devis_id):
+    obj = Devis.query.get(devis_id)
+    if not obj:
+        return jsonify({"error":"not_found"}), 404
+    return jsonify({"status":"ok","devis": obj.to_dict()})
+
+@app.get("/rdv/<int:rdv_id>")
+def rdv_get_one(rdv_id):
+    obj = Rdv.query.get(rdv_id)
+    if not obj:
+        return jsonify({"error":"not_found"}), 404
+    return jsonify({"status":"ok","rdv": obj.to_dict()})
+@app.put("/devis/<int:devis_id>")
+def devis_update(devis_id):
+    obj = Devis.query.get(devis_id)
+    if not obj:
+        return jsonify({"error":"not_found"}), 404
+    data = (request.get_json(silent=True) or {})
+    # champs étendus
+    if "client" in data and data["client"] is not None:
+        obj.client = str(data["client"]).strip()
+    if "devise" in data and data["devise"] is not None:
+        obj.devise = str(data["devise"])[:8]
+    if "montant" in data and data["montant"] is not None:
+        try:
+            obj.montant = float(data["montant"])
+        except Exception:
+            return jsonify({"error":"validation","details":"montant invalide"}), 400
+    if "dossier_id" in data:
+        try:
+            obj.dossier_id = int(data["dossier_id"]) if data["dossier_id"] is not None else None
+        except Exception:
+            return jsonify({"error":"validation","details":"dossier_id invalide"}), 400
+    if "status" in data and data["status"] is not None:
+        obj.status = data["status"]
+    db.session.commit()
+    return jsonify({"status":"ok","devis": obj.to_dict()})
