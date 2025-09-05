@@ -175,3 +175,19 @@ def _protect_jobs_test():
     if request.path == "/jobs/test" and request.method == "POST":
         if JOB_TOKEN and request.headers.get("X-Job-Token") != JOB_TOKEN:
             return jsonify({"error": "forbidden"}), 403
+
+
+# --- Phase 2 placeholders ---
+@app.route("/devis", methods=["GET","POST"])
+def devis_endpoint():
+    if request.method == "GET":
+        return jsonify({"status": "ok", "devis": []})
+    data = (request.get_json(silent=True) or {})
+    return jsonify({"status": "accepted", "input": data}), 202
+
+@app.route("/rdv", methods=["GET","POST"])
+def rdv_endpoint():
+    if request.method == "GET":
+        return jsonify({"status": "ok", "rdv": []})
+    data = (request.get_json(silent=True) or {})
+    return jsonify({"status": "accepted", "input": data}), 202
