@@ -33,3 +33,4 @@ nginx/*.conf.bad*
 *.bak*
 nginx/*.bak.*
 nginx/*.fix.*
+backend/tmp/tasks/
