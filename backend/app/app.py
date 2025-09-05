@@ -93,11 +93,22 @@ _redis = Redis(host=os.getenv("REDIS_HOST", "redis"),
                port=int(os.getenv("REDIS_PORT", 6379)))
 _queue = Queue(connection=_redis)
 
+IDEMPOTENCY_TTL = int(os.getenv("IDEMPOTENCY_TTL", "600"))  # 10 min
+
 @app.route("/jobs/test", methods=["POST"])
 def jobs_test():
     """Déclenche un job de démo."""
     n = int(request.args.get("n", 1))
+    key = request.headers.get("Idempotency-Key")
+    if key:
+        existing = _redis.get(f"idemp:{key}")
+        if existing:
+            job_id = existing.decode() if isinstance(existing, (bytes, bytearray)) else str(existing)
+            return jsonify({"status": "queued", "job_id": job_id}), 202
+
     job = _queue.enqueue(generate_pdf, source="http", n=n, result_ttl=86400, failure_ttl=604800)
+    if key:
+        _redis.setex(f"idemp:{key}", IDEMPOTENCY_TTL, job.get_id())
     return jsonify({"status": "queued", "job_id": job.get_id()}), 202
 
 @app.route("/jobs/<job_id>", methods=["GET"])
@@ -161,6 +172,6 @@ JOB_TOKEN = os.getenv("JOB_ENQUEUE_TOKEN")
 @app.before_request
 def _protect_jobs_test():
     # Protéger uniquement l'endpoint de démo
-    if request.path == "/jobs/test" and request.method in ("GET", "POST"):
+    if request.path == "/jobs/test" and request.method == "POST":
         if JOB_TOKEN and request.headers.get("X-Job-Token") != JOB_TOKEN:
             return jsonify({"error": "forbidden"}), 403
