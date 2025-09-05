@@ -257,8 +257,25 @@ class Rdv(db.Model):
 @app.route("/devis", methods=["GET","POST"])
 def devis_endpoint():
     if request.method == "GET":
-        items = [d.to_dict() for d in Devis.query.order_by(Devis.created_at.desc()).limit(100).all()]
-        return jsonify({"status":"ok","devis": items})
+        q = (request.args.get("q") or "").strip()
+        status = request.args.get("status")
+        try:
+            limit = min(max(int(request.args.get("limit", 50)), 1), 200)
+        except Exception:
+            limit = 50
+        try:
+            offset = max(int(request.args.get("offset", 0)), 0)
+        except Exception:
+            offset = 0
+        query = Devis.query
+        if status:
+            query = query.filter(Devis.status == status)
+        if q:
+            like = f"%{q}%"
+            query = query.filter(db.or_(Devis.client.ilike(like), Devis.ref.ilike(like)))
+        items = [d.to_dict() for d in query.order_by(Devis.created_at.desc()).offset(offset).limit(limit).all()]
+        return jsonify({"status":"ok","devis": items, "limit": limit, "offset": offset, "count": len(items)})
+
     data = (request.get_json(silent=True) or {})
 
     # validation légère
@@ -296,49 +313,85 @@ def devis_endpoint():
     return jsonify({"status":"created","devis": obj.to_dict()}), 201
 
 
+
 @app.route("/rdv", methods=["GET","POST"])
 def rdv_endpoint():
     if request.method == "GET":
-        items = [r.to_dict() for r in Rdv.query.order_by(Rdv.created_at.desc()).limit(100).all()]
-        return jsonify({"status":"ok","rdv": items})
-    data = (request.get_json(silent=True) or {})
-    from datetime import datetime, timezone
-    def _parse_ts(v):
-        if v is None: return None
-        if isinstance(v, (int,float)):
-            return datetime.fromtimestamp(float(v), tz=timezone.utc).replace(tzinfo=None)
-        s = str(v).strip()
-        if s.endswith('Z'): s = s[:-1] + '+00:00'
+        # -- filtres, pagination, tri --
+        from sqlalchemy import or_
+
+        def _parse_iso(ts):
+            if not ts:
+                return None
+            import datetime
+            try:
+                return datetime.datetime.fromisoformat(str(ts).replace("Z","+00:00")).replace(tzinfo=None)
+            except Exception:
+                return None
+
+        q = (request.args.get("q") or "").strip()
+        status = (request.args.get("status") or "").strip()
+        date_from = _parse_iso(request.args.get("date_from"))
+        date_to   = _parse_iso(request.args.get("date_to"))
         try:
-            dt = datetime.fromisoformat(s)
-            if dt.tzinfo: dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
-            return dt
+            limit = int(request.args.get("limit", 50))
+            offset = int(request.args.get("offset", 0))
+        except Exception:
+            return jsonify({"error":"validation","details":"limit/offset invalides"}), 400
+        limit = max(1, min(limit, 200))
+        offset = max(0, offset)
+
+        query = Rdv.query
+        if status:
+            query = query.filter(Rdv.status == status)
+
+        if q:
+            like = f"%{q}%"
+            query = query.filter(or_(Rdv.client_nom.ilike(like),
+                                     Rdv.adresse.ilike(like),
+                                     Rdv.ville.ilike(like)))
+        if date_from:
+            query = query.filter(Rdv.date_start >= date_from)
+        if date_to:
+            query = query.filter(Rdv.date_start <= date_to)
+
+        sort = (request.args.get("sort") or "date_start").lower()
+        order = (request.args.get("order") or "desc").lower()
+        colmap = {"date_start": Rdv.date_start, "created_at": Rdv.created_at}
+        col = colmap.get(sort, Rdv.date_start)
+        order_expr = col.desc() if order == "desc" else col.asc()
+        q2 = query.order_by(order_expr, Rdv.created_at.desc())
+        items = [r.to_dict() for r in q2.offset(offset).limit(limit).all()]
+        return jsonify({"status":"ok","rdv": items, "limit": limit, "offset": offset, "count": len(items)})
+
+    # -- POST: créer un RDV --
+    data = (request.get_json(silent=True) or {})
+
+    def _parse_iso(ts):
+        if not ts: return None
+        import datetime
+        try:
+            return datetime.datetime.fromisoformat(str(ts).replace("Z","+00:00")).replace(tzinfo=None)
         except Exception:
             return None
-    date_start = _parse_ts(data.get("date") or data.get("date_start"))
-    date_end   = _parse_ts(data.get("date_end"))
-    if not date_start:
-        return jsonify({"error":"validation","details":"date/date_start requis"}), 400
-    def _flt(v):
-        try: return float(v) if v is not None else None
-        except Exception: return None
+
+    date_start = _parse_iso(data.get("date") or data.get("date_start"))
+    date_end   = _parse_iso(data.get("date_end"))
+
     obj = Rdv(
-        dossier_id = data.get("dossier_id"),
-        client_nom = data.get("client_nom"),
-        adresse    = data.get("adresse"),
-        ville      = data.get("ville"),
-        lat        = _flt(data.get("lat")),
-        lon        = _flt(data.get("lon")),
-        technicien_id = data.get("technicien_id"),
-        status     = (data.get("status") or "planned")[:32],
-        notes      = data.get("notes"),
+        client_nom = (data.get("client_nom") or "").strip() or None,
+        adresse    = (data.get("adresse") or "").strip() or None,
+        ville      = (data.get("ville") or "").strip() or None,
+        status     = (data.get("status") or "planned"),
         date_start = date_start,
         date_end   = date_end,
+        technicien_id = (int(data["technicien_id"]) if data.get("technicien_id") is not None else None),
+        dossier_id    = (int(data["dossier_id"]) if data.get("dossier_id") is not None else None),
+        lat = (float(data["lat"]) if data.get("lat") is not None else None),
+        lon = (float(data["lon"]) if data.get("lon") is not None else None),
     )
     db.session.add(obj); db.session.commit()
     return jsonify({"status":"created","rdv": obj.to_dict()}), 201
-
-
 @app.get("/devis/<int:devis_id>")
 def devis_get_one(devis_id):
     obj = Devis.query.get(devis_id)
