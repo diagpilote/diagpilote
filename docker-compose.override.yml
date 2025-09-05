@@ -24,3 +24,4 @@ services:
     environment:
       - JOB_ENQUEUE_TOKEN=${JOB_ENQUEUE_TOKEN}
       - IDEMPOTENCY_TTL=${IDEMPOTENCY_TTL}
+      - API_KEY=${API_KEY}

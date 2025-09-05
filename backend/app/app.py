@@ -168,6 +168,7 @@ def jobs_download(job_id: str):
 # --- garde d'accès pour /jobs/test via X-Job-Token ---
 # Le token est lu dans l'env à l'initialisation du module
 JOB_TOKEN = os.getenv("JOB_ENQUEUE_TOKEN")
+API_KEY = os.getenv("API_KEY")
 
 @app.before_request
 def _protect_jobs_test():
@@ -177,6 +178,13 @@ def _protect_jobs_test():
             return jsonify({"error": "forbidden"}), 403
 
 
+
+
+@app.before_request
+def _protect_api_key_endpoints():
+    if request.path in ("/devis", "/rdv") and request.method in ("GET","POST"):
+        if API_KEY and request.headers.get("X-API-Key") != API_KEY:
+            return jsonify({"error":"forbidden"}), 403
 
 # --- Models Phase 2 ---
 
