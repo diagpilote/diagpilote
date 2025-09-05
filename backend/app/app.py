@@ -209,6 +209,42 @@ class Devis(db.Model):
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
 
+
+class Rdv(db.Model):
+    __tablename__ = "rdv"
+    id = db.Column(db.Integer, primary_key=True)
+    dossier_id = db.Column(db.Integer, db.ForeignKey('dossiers.id'), nullable=True)
+    date_start = db.Column(db.DateTime, nullable=False)
+    date_end   = db.Column(db.DateTime, nullable=True)
+    client_nom = db.Column(db.String(255), nullable=True)
+    adresse    = db.Column(db.String(255), nullable=True)
+    ville      = db.Column(db.String(120), nullable=True)
+    lat        = db.Column(db.Float, nullable=True)
+    lon        = db.Column(db.Float, nullable=True)
+    technicien_id = db.Column(db.Integer, nullable=True)
+    status     = db.Column(db.String(32), nullable=False, default="planned")
+    notes      = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow, nullable=False)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "dossier_id": self.dossier_id,
+            "date_start": self.date_start.isoformat() if self.date_start else None,
+            "date_end": self.date_end.isoformat() if self.date_end else None,
+            "client_nom": self.client_nom,
+            "adresse": self.adresse,
+            "ville": self.ville,
+            "lat": float(self.lat) if self.lat is not None else None,
+            "lon": float(self.lon) if self.lon is not None else None,
+            "technicien_id": self.technicien_id,
+            "status": self.status,
+            "notes": self.notes,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
 # --- Phase 2 placeholders ---
 @app.route("/devis", methods=["GET","POST"])
 def devis_endpoint():
@@ -232,6 +268,41 @@ def devis_endpoint():
 @app.route("/rdv", methods=["GET","POST"])
 def rdv_endpoint():
     if request.method == "GET":
-        return jsonify({"status": "ok", "rdv": []})
+        items = [r.to_dict() for r in Rdv.query.order_by(Rdv.created_at.desc()).limit(100).all()]
+        return jsonify({"status":"ok","rdv": items})
     data = (request.get_json(silent=True) or {})
-    return jsonify({"status": "accepted", "input": data}), 202
+    from datetime import datetime, timezone
+    def _parse_ts(v):
+        if v is None: return None
+        if isinstance(v, (int,float)):
+            return datetime.fromtimestamp(float(v), tz=timezone.utc).replace(tzinfo=None)
+        s = str(v).strip()
+        if s.endswith('Z'): s = s[:-1] + '+00:00'
+        try:
+            dt = datetime.fromisoformat(s)
+            if dt.tzinfo: dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+            return dt
+        except Exception:
+            return None
+    date_start = _parse_ts(data.get("date") or data.get("date_start"))
+    date_end   = _parse_ts(data.get("date_end"))
+    if not date_start:
+        return jsonify({"error":"validation","details":"date/date_start requis"}), 400
+    def _flt(v):
+        try: return float(v) if v is not None else None
+        except Exception: return None
+    obj = Rdv(
+        dossier_id = data.get("dossier_id"),
+        client_nom = data.get("client_nom"),
+        adresse    = data.get("adresse"),
+        ville      = data.get("ville"),
+        lat        = _flt(data.get("lat")),
+        lon        = _flt(data.get("lon")),
+        technicien_id = data.get("technicien_id"),
+        status     = (data.get("status") or "planned")[:32],
+        notes      = data.get("notes"),
+        date_start = date_start,
+        date_end   = date_end,
+    )
+    db.session.add(obj); db.session.commit()
+    return jsonify({"status":"created","rdv": obj.to_dict()}), 201
