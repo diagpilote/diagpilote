@@ -1,12 +1,10 @@
 
 services:
-  # --------------------
-  # Nginx Reverse Proxy
-  # --------------------
   nginx:
     image: nginx:1.27
+    container_name: diagpilote-nginx
     volumes:
-      - ./nginx:/etc/nginx/conf.d
+      - ./nginx:/etc/nginx/conf.d:ro
       - /etc/letsencrypt:/etc/letsencrypt:ro
       - /var/www/certbot:/var/www/certbot
     ports:
@@ -15,21 +13,18 @@ services:
     depends_on:
       - web
     restart: unless-stopped
-
-  # --------------------
-  # Backend Web (Flask + Gunicorn)
-  # --------------------
   web:
+    container_name: diagpilote-web
+    build: ./backend
+    command: "bash -lc 'exec gunicorn --chdir /app --pythonpath /app -w 2 -k gthread --threads 4 -b 0.0.0.0:8000 app.app:app'"
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://127.0.0.1:8000/health',timeout=3).getcode()==200 else sys.exit(1)"]
       interval: 10s
       timeout: 3s
       retries: 5
       start_period: 10s
-    build: ./backend
-    command: "gunicorn --chdir /app -w 2 -b 0.0.0.0:8000 app.app:app"
-    ports:
-      - "8000:8000"
+    expose:
+      - "8000"
     volumes:
       - ./backend:/app
     environment:
@@ -39,18 +34,12 @@ services:
     depends_on:
       - db
       - redis
-    networks:
-      default:
-        aliases:
-          - web
     restart: unless-stopped
-
-  # --------------------
-  # Worker pour tâches asynchrones (emails, PDF, OCR...)
-  # --------------------
   worker:
+    container_name: diagpilote-worker
     build: ./backend
-    command: "python3 worker.py"
+    working_dir: /app
+    command: bash -lc 'PYTHONPATH=/app exec python3 -u -m app.worker'
     volumes:
       - ./backend:/app
     environment:
@@ -62,14 +51,13 @@ services:
       - redis
     restart: unless-stopped
 
-  # --------------------
-  # Scheduler (planification des tâches)
-  # --------------------
   scheduler:
-    build: ./backend/scheduler
-    command: "python3 scheduler.py"
+    container_name: diagpilote-scheduler
+    build: ./backend
+    working_dir: /app
+    command: bash -lc 'PYTHONPATH=/app exec python3 -u -m app.scheduler'
     volumes:
-      - ./backend/scheduler:/app
+      - ./backend:/app
     environment:
       - DATABASE_URL=postgresql+psycopg2://postgres:postgres@db:5432/diagpilote
       - REDIS_URL=redis://redis:6379/0
@@ -78,38 +66,31 @@ services:
       - db
       - redis
     restart: unless-stopped
-
-  # --------------------
-  # Base de données PostgreSQL
-  # --------------------
   db:
     image: postgres:15
+    container_name: diagpilote-db
     environment:
+      POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: diagpilote
     volumes:
       - db_data:/var/lib/postgresql/data
     restart: unless-stopped
 
-  # --------------------
-  # Redis (queue pour worker)
-  # --------------------
   redis:
     image: redis:7
+    container_name: diagpilote-redis
+    command: ["redis-server", "--appendonly", "yes"]
     restart: unless-stopped
 
-  # --------------------
-  # Certbot (pour SSL Let’s Encrypt)
-  # --------------------
   certbot:
     image: certbot/certbot:v2.8.0
+    container_name: diagpilote-certbot
     volumes:
       - /var/www/certbot:/var/www/certbot
       - /etc/letsencrypt:/etc/letsencrypt
+    entrypoint: ["sh","-c","trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot; sleep 12h; done"]
     restart: unless-stopped
 
-# --------------------
-# Volumes persistants
-# --------------------
 volumes:
   db_data:

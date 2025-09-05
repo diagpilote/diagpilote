@@ -74,3 +74,8 @@ def api_send_email():
     return jsonify({"status": "sent"}), 200
 if __name__ == "__main__":
     app.run()
+from flask import redirect
+
+@app.route("/")
+def root_redirect():
+    return redirect("/kanban", code=302)

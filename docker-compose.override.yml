@@ -1,0 +1,10 @@
+services:
+  worker:
+    volumes:
+      - ./backend:/app
+    command: bash -lc 'PYTHONPATH=/app exec python3 -u -m app.worker'
+
+  scheduler:
+    volumes:
+      - ./backend:/app
+    command: bash -lc 'PYTHONPATH=/app exec python3 -u -m app.scheduler'
