@@ -34,3 +34,4 @@ nginx/*.conf.bad*
 nginx/*.bak.*
 nginx/*.fix.*
 backend/tmp/tasks/
+pdf_*.txt
