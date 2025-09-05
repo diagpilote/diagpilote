@@ -31,3 +31,5 @@ letsencrypt/
 var/www/certbot/
 nginx/*.conf.bad*
 *.bak*
+nginx/*.bak.*
+nginx/*.fix.*
