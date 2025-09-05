@@ -38,3 +38,21 @@ done
 
 # Download
 curl -sk -OJ "https://diagpilote.app/jobs/$JOB/download"
+### Idempotence
+- Envoie l’en-tête `Idempotency-Key: <clé-unique>` pour éviter les doublons.
+- Fenêtre configurable via `IDEMPOTENCY_TTL` (par défaut **900s**).
+
+Exemple :
+```bash
+TOKEN=$(docker compose exec -T web printenv JOB_ENQUEUE_TOKEN | tr -d '\r')
+KEY="demo-$(date +%s)"
+
+# 1er POST -> crée le job
+curl -sk -X POST -H "X-Job-Token: $TOKEN" -H "Idempotency-Key: $KEY" \
+  "https://diagpilote.app/jobs/test?n=2"
+
+# 2e POST (même clé) -> renvoie le même job_id
+curl -sk -X POST -H "X-Job-Token: $TOKEN" -H "Idempotency-Key: $KEY" \
+  "https://diagpilote.app/jobs/test?n=2"
+
+```
