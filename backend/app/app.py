@@ -177,13 +177,57 @@ def _protect_jobs_test():
             return jsonify({"error": "forbidden"}), 403
 
 
+
+# --- Models Phase 2 ---
+
+class DossiersRef(db.Model):
+    __tablename__ = "dossiers"
+    id = db.Column(db.Integer, primary_key=True)
+
+class Devis(db.Model):
+    __tablename__ = "devis"
+    id = db.Column(db.Integer, primary_key=True)
+    ref = db.Column(db.String(32), unique=True, nullable=False)
+    client = db.Column(db.String(255), nullable=False)
+    montant = db.Column(db.Numeric(10,2), nullable=False)
+    devise = db.Column(db.String(8), nullable=False, default="EUR")
+    status = db.Column(db.String(32), nullable=False, default="draft")
+    dossier_id = db.Column(db.Integer, db.ForeignKey('dossiers.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "ref": self.ref,
+            "client": self.client,
+            "montant": float(self.montant) if self.montant is not None else None,
+            "devise": self.devise,
+            "status": self.status,
+            "dossier_id": self.dossier_id,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
 # --- Phase 2 placeholders ---
 @app.route("/devis", methods=["GET","POST"])
 def devis_endpoint():
     if request.method == "GET":
-        return jsonify({"status": "ok", "devis": []})
+        items = [d.to_dict() for d in Devis.query.order_by(Devis.created_at.desc()).limit(100).all()]
+        return jsonify({"status":"ok","devis": items})
     data = (request.get_json(silent=True) or {})
-    return jsonify({"status": "accepted", "input": data}), 202
+    client = (data.get("client") or "").strip()
+    montant = data.get("montant")
+    devise  = (data.get("devise") or "EUR")[:8]
+    dossier_id = data.get("dossier_id")
+    if not client or montant is None:
+        return jsonify({"error":"validation","details":"client and montant required"}), 400
+    import time, secrets
+    ref = f"DV-{int(time.time())}-{secrets.token_hex(3).upper()}"
+    obj = Devis(ref=ref, client=client, montant=montant, devise=devise, dossier_id=dossier_id, status="draft")
+    db.session.add(obj); db.session.commit()
+    return jsonify({"status":"created","devis": obj.to_dict()}), 201
+
 
 @app.route("/rdv", methods=["GET","POST"])
 def rdv_endpoint():
