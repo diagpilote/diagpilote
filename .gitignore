@@ -24,3 +24,10 @@ db_data/
 # Certs & web root hors projet
 /etc/letsencrypt/
 var/www/certbot/
+
+# --- extra (secrets & artefacts locaux) ---
+certbot/
+letsencrypt/
+var/www/certbot/
+nginx/*.conf.bad*
+*.bak*
