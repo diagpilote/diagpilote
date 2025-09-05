@@ -79,3 +79,77 @@ from flask import redirect
 @app.route("/")
 def root_redirect():
     return redirect("/kanban", code=302)
+
+# ===== RQ enqueue & status (ajout) =====
+import os
+from flask import request, jsonify
+from redis import Redis
+from rq import Queue
+from rq.job import Job
+from rq.exceptions import NoSuchJobError
+from app.tasks import generate_pdf
+
+_redis = Redis(host=os.getenv("REDIS_HOST", "redis"),
+               port=int(os.getenv("REDIS_PORT", 6379)))
+_queue = Queue(connection=_redis)
+
+@app.route("/jobs/test", methods=["POST", "GET"])
+def jobs_test():
+    """Déclenche un job de démo."""
+    n = int(request.args.get("n", 1))
+    job = _queue.enqueue(generate_pdf, source="http", n=n, result_ttl=86400, failure_ttl=604800)
+    return jsonify({"status": "queued", "job_id": job.get_id()}), 202
+
+@app.route("/jobs/<job_id>", methods=["GET"])
+def jobs_status(job_id: str):
+    """Retourne l'état + résultat d'un job RQ."""
+    try:
+        job = Job.fetch(job_id, connection=_redis)
+    except NoSuchJobError:
+        return jsonify({"error": "job_not_found", "job_id": job_id}), 404
+
+    return jsonify({
+        "job_id": job.get_id(),
+        "status": job.get_status(),   # queued | started | finished | failed | deferred
+        "enqueued_at": job.enqueued_at.isoformat() if job.enqueued_at else None,
+        "ended_at": job.ended_at.isoformat() if job.ended_at else None,
+        "result": job.result,
+        "exc_info": job.exc_info,
+    })
+# ===== fin ajout =====
+
+# ===== download du résultat d'un job =====
+import os
+from flask import send_file, jsonify
+from werkzeug.utils import safe_join
+
+_TASKS_DIR = os.getenv("TASKS_OUTPUT_DIR", "/app/tmp/tasks")
+
+@app.route("/jobs/<job_id>/download", methods=["GET"])
+def jobs_download(job_id: str):
+    try:
+        job = Job.fetch(job_id, connection=_redis)
+    except NoSuchJobError:
+        return jsonify({"error": "job_not_found", "job_id": job_id}), 404
+
+    res = job.result
+    if not isinstance(res, dict) or "output" not in res:
+        return jsonify({"error": "no_output_for_job", "job_id": job_id}), 409
+
+    output_path = res["output"]
+    # Normaliser et s'assurer que le fichier reste sous _TASKS_DIR
+    try:
+        rel = os.path.relpath(output_path, _TASKS_DIR)
+    except ValueError:
+        return jsonify({"error": "bad_output_path"}), 400
+    if rel.startswith(".."):
+        return jsonify({"error": "bad_output_path"}), 400
+
+    full = safe_join(_TASKS_DIR, rel)
+    if not full or not os.path.isfile(full):
+        return jsonify({"error": "file_not_found", "path": rel}), 404
+
+    return send_file(full, as_attachment=True,
+                     download_name=os.path.basename(full),
+                     mimetype="text/plain")
+# ===== fin ajout =====

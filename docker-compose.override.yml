@@ -1,10 +1,21 @@
 services:
+  redis:
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   worker:
-    volumes:
-      - ./backend:/app
-    command: bash -lc 'PYTHONPATH=/app exec python3 -u -m app.worker'
+    depends_on:
+      db:
+        condition: service_started
+      redis:
+        condition: service_healthy
 
   scheduler:
-    volumes:
-      - ./backend:/app
-    command: bash -lc 'PYTHONPATH=/app exec python3 -u -m app.scheduler'
+    depends_on:
+      db:
+        condition: service_started
+      redis:
+        condition: service_healthy
