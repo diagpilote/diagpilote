@@ -443,3 +443,23 @@ def rdv_update(rdv_id):
 
     db.session.commit()
     return jsonify({"status":"ok","rdv": obj.to_dict()})
+
+
+@app.delete("/devis/<int:devis_id>")
+def devis_delete(devis_id):
+    obj = Devis.query.get(devis_id)
+    if not obj:
+        return jsonify({"error":"not_found"}), 404
+    db.session.delete(obj)
+    db.session.commit()
+    return '', 204
+
+
+@app.delete("/rdv/<int:rdv_id>")
+def rdv_delete(rdv_id):
+    obj = Rdv.query.get(rdv_id)
+    if not obj:
+        return jsonify({"error":"not_found"}), 404
+    db.session.delete(obj)
+    db.session.commit()
+    return '', 204
