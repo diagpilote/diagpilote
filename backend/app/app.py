@@ -260,6 +260,29 @@ def devis_endpoint():
         items = [d.to_dict() for d in Devis.query.order_by(Devis.created_at.desc()).limit(100).all()]
         return jsonify({"status":"ok","devis": items})
     data = (request.get_json(silent=True) or {})
+
+    # validation légère
+    allowed = {"PLANIFIE","A_PLANIFIER","TERMINE","CANCELED","planned","done","pending"}
+    if "status" in data and data["status"] is not None and data["status"] not in allowed:
+        return jsonify({"error":"validation","details":"status invalide"}), 400
+
+    # longueurs raisonnables
+    for key in ("client_nom","adresse","ville","notes"):
+        if key in data and data[key] is not None and len(str(data[key])) > 255:
+            return jsonify({"error":"validation","details":f"{key} trop long"}), 400
+
+    # lat/lon
+    for key in ("lat","lon"):
+        if key in data and data[key] is not None:
+            try:
+                v = float(data[key])
+            except Exception:
+                return jsonify({"error":"validation","details":f"{key} invalide"}), 400
+            if key == "lat" and not (-90 <= v <= 90):
+                return jsonify({"error":"validation","details":"lat hors plage"}), 400
+            if key == "lon" and not (-180 <= v <= 180):
+                return jsonify({"error":"validation","details":"lon hors plage"}), 400
+
     client = (data.get("client") or "").strip()
     montant = data.get("montant")
     devise  = (data.get("devise") or "EUR")[:8]
@@ -354,3 +377,69 @@ def devis_update(devis_id):
         obj.status = data["status"]
     db.session.commit()
     return jsonify({"status":"ok","devis": obj.to_dict()})
+
+
+@app.put("/rdv/<int:rdv_id>")
+def rdv_update(rdv_id):
+    obj = Rdv.query.get(rdv_id)
+    if not obj:
+        return jsonify({"error":"not_found"}), 404
+    data = (request.get_json(silent=True) or {})
+
+    # validation légère (spécifique RDV)
+    allowed = {"PLANIFIE","A_PLANIFIER","TERMINE","CANCELED","planned","done","pending"}
+    if "status" in data and data["status"] is not None and data["status"] not in allowed:
+        return jsonify({"error":"validation","details":"status invalide"}), 400
+
+    # longueurs raisonnables
+    for key in ("client_nom","adresse","ville","notes"):
+        if key in data and data[key] is not None and len(str(data[key])) > 255:
+            return jsonify({"error":"validation","details":f"{key} trop long"}), 400
+
+    # lat/lon bornés
+    for key in ("lat","lon"):
+        if key in data and data[key] is not None:
+            try:
+                v = float(data[key])
+            except Exception:
+                return jsonify({"error":"validation","details":f"{key} invalide"}), 400
+            if key == "lat" and not (-90 <= v <= 90):
+                return jsonify({"error":"validation","details":"lat hors plage"}), 400
+            if key == "lon" and not (-180 <= v <= 180):
+                return jsonify({"error":"validation","details":"lon hors plage"}), 400
+
+    # textes simples
+    for key in ("client_nom","adresse","ville","notes","status"):
+        if key in data and data[key] is not None:
+            setattr(obj, key, str(data[key]))
+
+    # date (champ unique "date" -> date_start)
+    def _parse_iso(ts):
+        if not ts: return None
+        try:
+            return datetime.datetime.fromisoformat(str(ts).replace("Z","+00:00")).replace(tzinfo=None)
+        except Exception:
+            return None
+    if "date" in data:
+        v = _parse_iso(data["date"])
+        if v: obj.date_start = v
+    # dates explicites
+    if "date_start" in data:
+        v = _parse_iso(data["date_start"])
+        if v: obj.date_start = v
+    if "date_end" in data:
+        v = _parse_iso(data["date_end"])
+        if v: obj.date_end = v
+
+    # entiers
+    for key in ("technicien_id","dossier_id"):
+        if key in data:
+            setattr(obj, key, int(data[key]) if data[key] is not None else None)
+
+    # flottants
+    for key in ("lat","lon"):
+        if key in data:
+            setattr(obj, key, float(data[key]) if data[key] is not None else None)
+
+    db.session.commit()
+    return jsonify({"status":"ok","rdv": obj.to_dict()})
