@@ -21,6 +21,10 @@ services:
         condition: service_healthy
 
   web:
+    command: >-
+      bash -lc "cd /app &&
+                  alembic upgrade head &&
+                  exec gunicorn -w 2 -k gthread -b 0.0.0.0:8000 app.app:app"
     environment:
       - JOB_ENQUEUE_TOKEN=${JOB_ENQUEUE_TOKEN}
       - IDEMPOTENCY_TTL=${IDEMPOTENCY_TTL}
