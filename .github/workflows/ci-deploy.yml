@@ -2,8 +2,8 @@ name: CI & Deploy
 
 on:
   push:
-    branches: ["main"]
-  workflow_dispatch:
+    branches: ["main"]         # Déclenche sur push main
+  workflow_dispatch:            # Permet de lancer manuellement
 
 concurrency:
   group: ci-deploy-${{ github.ref }}
@@ -19,30 +19,37 @@ jobs:
       REGISTRY: ghcr.io
       OWNER: ${{ github.repository_owner }}
     steps:
-      - name: Checkout
+      - name: Checkout repo
         uses: actions/checkout@v4
 
-      # Login GHCR avec le GITHUB_TOKEN (pas besoin de secrets séparés pour build/push)
       - name: Login to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
+      # --- Build Web / Backend ---
       - name: Build & push web
         run: |
-          docker build -t ${REGISTRY}/${OWNER}/diagpilote-web:latest -f backend/Dockerfile backend
-          docker push ${REGISTRY}/${OWNER}/diagpilote-web:latest
+          if [ -f backend/Dockerfile ]; then
+            docker build -t ${REGISTRY}/${OWNER}/diagpilote-web:latest -f backend/Dockerfile backend
+            docker push ${REGISTRY}/${OWNER}/diagpilote-web:latest
+          else
+            echo "⚠️ Aucun Dockerfile trouvé dans backend/, étape ignorée."
+          fi
 
+      # --- Build Worker ---
       - name: Build & push worker (if present)
         if: hashFiles('worker/Dockerfile') != ''
         run: |
           docker build -t ${REGISTRY}/${OWNER}/diagpilote-worker:latest -f worker/Dockerfile worker
           docker push ${REGISTRY}/${OWNER}/diagpilote-worker:latest
 
+      # --- Build Scheduler ---
       - name: Build & push scheduler (if present)
         if: hashFiles('scheduler/Dockerfile') != ''
         run: |
           docker build -t ${REGISTRY}/${OWNER}/diagpilote-scheduler:latest -f scheduler/Dockerfile scheduler
           docker push ${REGISTRY}/${OWNER}/diagpilote-scheduler:latest
 
+      # --- Build Nginx ---
       - name: Build & push nginx (if present)
         if: hashFiles('nginx/Dockerfile') != ''
         run: |
@@ -58,25 +65,27 @@ jobs:
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_KEY }}          # clé privée qui ouvre sur le serveur
+          key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.SSH_PORT }}
           script_stop: true
           script: |
             set -euo pipefail
             cd "${{ secrets.DEPLOY_PATH }}"
 
-            # Login GHCR côté serveur (nécessite GHCR_USERNAME + GHCR_TOKEN en secrets du repo)
+            echo "🔑 Login to GHCR..."
             docker login ghcr.io -u "${{ secrets.GHCR_USERNAME }}" -p "${{ secrets.GHCR_TOKEN }}"
 
-            # Pull (tolérant si un service n'existe pas)
+            echo "⬇️ Pull latest images..."
             docker compose -f docker-compose.yml -f docker-compose.override.yml pull web || true
             docker compose -f docker-compose.yml -f docker-compose.override.yml pull worker || true
             docker compose -f docker-compose.yml -f docker-compose.override.yml pull scheduler || true
             docker compose -f docker-compose.yml -f docker-compose.override.yml pull nginx || true
 
-            # Up
+            echo "🚀 Restart services..."
             docker compose -f docker-compose.yml -f docker-compose.override.yml up -d
 
-            # Nettoyage & état
+            echo "🧹 Cleanup images..."
             docker image prune -f || true
+
+            echo "📊 Current containers:"
             docker compose ps
