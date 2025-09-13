@@ -1,0 +1,16 @@
+# secrets & env
+.env
+.env.*
+*.bak
+
+# données locales
+postgres-data/
+backups/
+
+# artefacts
+*.log
+*.zip
+
+# python
+__pycache__/
+*.pyc
